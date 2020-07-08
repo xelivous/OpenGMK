@@ -3,6 +3,7 @@
 
 mod action;
 mod asset;
+mod audio;
 mod game;
 mod gml;
 mod input;
