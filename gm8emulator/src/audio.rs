@@ -1,7 +1,7 @@
 //! GameMaker 8 sound system.
 
 use rodio::{Device, Sink, Source};
-use std::{alloc, collections::HashMap, mem, slice, sync::Arc, time::Duration};
+use std::{alloc, collections::HashMap, mem, slice, str, sync::Arc, time::Duration};
 
 pub struct AudioSystem {
     current_mp3: Option<(AudioHandle, Sink)>,
@@ -148,10 +148,10 @@ impl Iterator for MP3Stream {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match self.frame_samples.get(self.frame_ofs) {
+        match self.frame_samples.get(self.frame_ofs).copied() {
             Some(sample) => {
                 self.frame_ofs += 1;
-                Some(*sample)
+                Some(sample)
             },
             None => {
                 if self.refill() {
@@ -186,8 +186,133 @@ impl Source for MP3Stream {
     }
 }
 
-struct WaveStream {
+enum WaveStream {
+    Int16(PCMSource<i16>),
+    Float(PCMSource<f32>),
+}
+
+impl WaveStream {
+    pub fn new(data: Arc<Box<[u8]>>) -> Option<Self> {
+        let data2 = data.clone(); // shut the fuck up
+        let (hdr, mut riff) = riff_chunk(data2.as_ref())?;
+        if hdr != "RIFF" {
+            return None
+        }
+        let mut offset = 8 + 4;
+
+        riff = &riff[4..]; // 'WAVE'
+
+        let mut format_tag: Option<u16> = None;
+        let mut channels: Option<u16> = None;
+        let mut sample_rate: Option<u32> = None;
+        let mut bits_per_sample: Option<u16> = None;
+
+        loop {
+            let (header, chunk) = riff_chunk(riff)?;
+            match header {
+                "fmt " => {
+                    if chunk.len() < 16 {
+                        return None
+                    }
+                    format_tag = Some(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    channels = Some(u16::from_le_bytes([chunk[2], chunk[3]]));
+                    sample_rate = Some(u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]));
+                    bits_per_sample = Some(u16::from_le_bytes([chunk[14], chunk[15]]));
+                },
+                "data" => {
+                    let (bps, fmt, channels, sample_rate) = (bits_per_sample?, format_tag?, channels?, sample_rate?);
+                    match fmt {
+                        1 => {
+                            assert_eq!(bps, 16);
+                            break Some(WaveStream::Int16(PCMSource::new(
+                                data,
+                                offset + 8,
+                                chunk.len(),
+                                channels,
+                                sample_rate,
+                            )))
+                        },
+                        3 => {
+                            assert_eq!(bps, 32);
+                            break Some(WaveStream::Float(PCMSource::new(
+                                data,
+                                offset + 8,
+                                chunk.len(),
+                                channels,
+                                sample_rate,
+                            )))
+                        },
+                        6 => unimplemented!("alaw unimplemented"),
+                        7 => unimplemented!("mulaw unimplemented"),
+                        _ => return None,
+                    }
+                },
+                _ => (),
+            }
+            offset += 8 + chunk.len();
+            riff = &riff[8 + chunk.len()..];
+        }
+    }
+}
+
+struct PCMSource<T: 'static> {
+    channels: u16,
+    duration: Duration,
+    sample_rate: u32,
+
     _data: Arc<Box<[u8]>>,
+    pcm: &'static [T],
+    ofs: usize,
+}
+
+impl<T> Clone for PCMSource<T> {
+    fn clone(&self) -> Self {
+        Self { _data: self._data.clone(), ofs: 0, ..*self }
+    }
+}
+
+impl<T: rodio::Sample + 'static> PCMSource<T> {
+    pub fn new(data: Arc<Box<[u8]>>, byte_ofs: usize, byte_len: usize, channels: u16, sample_rate: u32) -> Self {
+        let pcm: &'static [T] = unsafe {
+            slice::from_raw_parts(data.as_ptr().offset(byte_ofs as isize).cast(), byte_len / mem::size_of::<T>())
+        };
+        let duration = Duration::from_secs_f64(pcm.len() as f64 / channels as f64 / sample_rate as f64);
+
+        Self { channels, duration, sample_rate, _data: data, pcm, ofs: 0 }
+    }
+}
+
+impl<T: rodio::Sample + 'static> Iterator for PCMSource<T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let sample = self.pcm.get(self.ofs).copied()?;
+        self.ofs += 1;
+        Some(sample)
+    }
+}
+
+impl<T: rodio::Sample + 'static> Source for PCMSource<T> {
+    #[inline]
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.pcm.len())
+    }
+
+    #[inline]
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    #[inline]
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    #[inline]
+    fn total_duration(&self) -> Option<Duration> {
+        Some(self.duration)
+    }
 }
 
 impl AudioSystem {
@@ -219,6 +344,14 @@ impl AudioSystem {
                 sink.append(mp3.clone());
                 self.current_mp3 = Some((sound, sink));
             },
+            Some(AudioAsset::Wave(wave)) => {
+                let sink = Sink::new(device);
+                match wave {
+                    WaveStream::Int16(ipcm) => sink.append(ipcm.clone()),
+                    WaveStream::Float(fpcm) => sink.append(fpcm.clone()),
+                }
+                self.wave_sinks.insert(sound, sink);
+            },
             Some(_) => unimplemented!(),
             _ => (),
         }
@@ -232,9 +365,19 @@ impl AudioSystem {
         Some(AudioHandle(id))
     }
 
-    pub fn register_other(&mut self, _data: impl Into<Box<[u8]>>) -> Option<AudioHandle> {
-        unimplemented!()
+    pub fn register_wav(&mut self, data: impl Into<Box<[u8]>>) -> Option<AudioHandle> {
+        let stream = WaveStream::new(data.into().into())?;
+        let id = self.next_asset_handle;
+        self.next_asset_handle += 1;
+        self.assets.insert(AudioHandle(id), AudioAsset::Wave(stream));
+        Some(AudioHandle(id))
     }
+}
+
+fn riff_chunk<'a>(data: &'a [u8]) -> Option<(&'a str, &'a [u8])> {
+    let header = data.get(..4).and_then(|bs| str::from_utf8(bs).ok())?;
+    let length = data.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))?;
+    Some((header, data.get(8..8 + length as usize)?))
 }
 
 #[inline(always)]
