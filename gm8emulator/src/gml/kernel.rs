@@ -9476,8 +9476,12 @@ impl Game {
 
     pub fn sound_play(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
         let id = expect_args!(args, [int])?;
-        if let Some(handle) = self.assets.sounds.get_asset(id).and_then(|sound| sound.audio) {
-            self.audio_system.play(handle);
+        if let Some(sound) = self.assets.sounds.get_asset(id) {
+            if self.play_type != PlayType::Record {
+                if let Some(handle) = sound.audio {
+                    self.audio_system.play(handle);
+                }
+            }
             Ok(Default::default())
         } else {
             Err(gml::Error::NonexistentAsset(asset::Type::Sound, id))
