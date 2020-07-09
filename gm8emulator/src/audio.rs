@@ -223,7 +223,7 @@ impl WaveStream {
                     let (bps, fmt, channels, sample_rate) = (bits_per_sample?, format_tag?, channels?, sample_rate?);
                     match fmt {
                         1 => {
-                            assert_eq!(bps, 16);
+                            assert_eq!(bps, 16); // It can technically be other than i16. TODO?
                             break Some(WaveStream::Int16(PCMSource::new(
                                 data,
                                 offset + 8,
@@ -233,7 +233,7 @@ impl WaveStream {
                             )))
                         },
                         3 => {
-                            assert_eq!(bps, 32);
+                            assert_eq!(bps, 32); // Maybe this can be 64? Don't care.
                             break Some(WaveStream::Float(PCMSource::new(
                                 data,
                                 offset + 8,
