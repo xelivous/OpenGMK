@@ -113,40 +113,51 @@ impl MP3Stream {
             decoder: rmp3::Decoder::new(),
         })
     }
+
+    fn refill(&mut self) -> bool {
+        use rmp3::{Frame, Samples};
+
+        loop {
+            match self.decoder.peek(&self.data_ref[self.data_ofs..]) {
+                Ok(Frame::Audio(Samples { bytes_consumed, channels, sample_rate, .. })) => {
+                    if channels as u16 == self.channels && sample_rate == self.sample_rate {
+                        match self.decoder.next(&self.data_ref[self.data_ofs..], self.frame_buf.as_mut()) {
+                            Ok(Frame::Audio(samples)) => {
+                                self.frame_samples = unsafe { mem::transmute(samples.samples) }; // mmm
+                                self.frame_ofs = 0;
+                                self.data_ofs += bytes_consumed;
+                                break true
+                            },
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        self.data_ofs += bytes_consumed;
+                    }
+                },
+                Ok(Frame::Unknown { bytes_consumed, .. }) => {
+                    self.data_ofs += bytes_consumed;
+                },
+                Err(rmp3::InsufficientData) => break false,
+            }
+        }
+    }
 }
 
 impl Iterator for MP3Stream {
     type Item = rmp3::Sample;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        use rmp3::{Frame, Samples};
-
         match self.frame_samples.get(self.frame_ofs) {
             Some(sample) => {
                 self.frame_ofs += 1;
                 Some(*sample)
             },
-            None => loop {
-                match self.decoder.peek(&self.data_ref[self.data_ofs..]) {
-                    Ok(Frame::Audio(Samples { bytes_consumed, channels, sample_rate, .. })) => {
-                        if channels as u16 == self.channels && sample_rate == self.sample_rate {
-                            match self.decoder.next(&self.data_ref[self.data_ofs..], self.frame_buf.as_mut()) {
-                                Ok(Frame::Audio(samples)) => {
-                                    self.frame_samples = unsafe { mem::transmute(samples.samples) }; // mmm
-                                    self.frame_ofs = 0;
-                                    self.data_ofs += bytes_consumed;
-                                    break self.next() // possible SO
-                                },
-                                _ => unreachable!(),
-                            }
-                        } else {
-                            self.data_ofs += bytes_consumed;
-                        }
-                    },
-                    Ok(Frame::Unknown { bytes_consumed, .. }) => {
-                        self.data_ofs += bytes_consumed;
-                    },
-                    Err(rmp3::InsufficientData) => break None,
+            None => {
+                if self.refill() {
+                    self.next() // possible SO
+                } else {
+                    None
                 }
             },
         }
@@ -154,18 +165,22 @@ impl Iterator for MP3Stream {
 }
 
 impl Source for MP3Stream {
+    #[inline]
     fn current_frame_len(&self) -> Option<usize> {
         None // inf
     }
 
+    #[inline]
     fn channels(&self) -> u16 {
         self.channels
     }
 
+    #[inline]
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
+    #[inline]
     fn total_duration(&self) -> Option<Duration> {
         Some(self.duration)
     }
