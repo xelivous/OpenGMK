@@ -1787,23 +1787,17 @@ impl Game {
         Ok(Default::default())
     }
 
-    pub fn action_sound(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 2
-        // TODO
-        //unimplemented!("Called unimplemented kernel function action_sound")
-        Ok(Default::default())
+    pub fn action_sound(&mut self, context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        let (id, looping) = expect_args!(args, [any, any])?;
+        if looping.is_truthy() { self.sound_loop(context, &[id]) } else { self.sound_play(context, &[id]) }
     }
 
-    pub fn action_end_sound(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 1
-        // TODO
-        //unimplemented!("Called unimplemented kernel function action_end_sound")
-        Ok(Default::default())
+    pub fn action_end_sound(&mut self, context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        self.sound_stop(context, args)
     }
 
-    pub fn action_if_sound(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 1
-        unimplemented!("Called unimplemented kernel function action_if_sound")
+    pub fn action_if_sound(&mut self, context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        self.sound_isplaying(context, args)
     }
 
     pub fn action_another_room(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
