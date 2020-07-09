@@ -167,7 +167,7 @@ impl Iterator for MP3Stream {
 impl Source for MP3Stream {
     #[inline]
     fn current_frame_len(&self) -> Option<usize> {
-        None // inf
+        Some(self.frame_samples.len())
     }
 
     #[inline]
