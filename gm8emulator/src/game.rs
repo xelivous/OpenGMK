@@ -22,8 +22,9 @@ use crate::{
         room::{self, Room},
         sprite::{Collider, Frame, Sprite},
         trigger::{self, Trigger},
-        Object, Script, Timeline,
+        Object, Script, Sound, Timeline,
     },
+    audio::AudioSystem,
     gml::{
         self,
         ds::{self, DataStructureManager},
@@ -78,6 +79,8 @@ pub struct Game {
     pub renderer: Renderer,
     pub background_colour: Colour,
     pub room_colour: Option<Colour>,
+
+    pub audio_system: AudioSystem,
 
     pub last_instance_id: ID,
     pub last_tile_id: ID,
@@ -183,10 +186,10 @@ pub struct Assets {
     pub paths: Vec<Option<Box<Path>>>,
     pub rooms: Vec<Option<Box<Room>>>,
     pub scripts: Vec<Option<Box<Script>>>,
+    pub sounds: Vec<Option<Box<Sound>>>,
     pub sprites: Vec<Option<Box<Sprite>>>,
     pub timelines: Vec<Option<Box<Timeline>>>,
     pub triggers: Vec<Option<Box<Trigger>>>,
-    // todo
 }
 
 impl Game {
@@ -297,7 +300,7 @@ impl Game {
             .enumerate()
             .filter_map(|(i, x)| x.as_ref().map(|x| (i, x)))
             .for_each(|(i, x)| compiler.register_script(x.name.clone(), i));
-        
+
         // Register user constants
         constants.iter().enumerate().for_each(|(i, x)| compiler.register_user_constant(x.name.clone(), i));
 
@@ -320,6 +323,24 @@ impl Game {
         //println!("GPU Max Texture Size: {}", renderer.max_gpu_texture_size());
 
         let particle_shapes = particle::load_shapes(&mut atlases);
+
+        let mut audio_system = AudioSystem::new();
+
+        let sounds = sounds
+            .into_iter()
+            .map(|o| {
+                o.map(|b| {
+                    Box::new(Sound {
+                        name: b.name.into(),
+                        audio: match b.extension.as_str() {
+                            ".wav" => b.data.and_then(|data| audio_system.register_wav(data)),
+                            ".mp3" => b.data.and_then(|data| audio_system.register_mp3(data)),
+                            _ => None,
+                        },
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
 
         let sprites = sprites
             .into_iter()
@@ -740,8 +761,9 @@ impl Game {
             renderer: renderer,
             background_colour: settings.clear_colour.into(),
             room_colour: room1_colour,
+            audio_system,
             input_manager: InputManager::new(),
-            assets: Assets { backgrounds, fonts, objects, paths, rooms, scripts, sprites, timelines, triggers },
+            assets: Assets { backgrounds, fonts, objects, paths, rooms, scripts, sounds, sprites, timelines, triggers },
             event_holders,
             custom_draw_objects,
             views_enabled: false,
@@ -806,7 +828,9 @@ impl Game {
         // Evaluate constants
         for c in &constants {
             let expr = game.compiler.compile_expression(&c.expression)?;
-            let dummy_instance = game.instance_list.insert_dummy(Instance::new_dummy(game.assets.objects.get_asset(0).map(|x| x.as_ref())));
+            let dummy_instance = game
+                .instance_list
+                .insert_dummy(Instance::new_dummy(game.assets.objects.get_asset(0).map(|x| x.as_ref())));
             let value = game.eval(&expr, &mut Context {
                 this: dummy_instance,
                 other: dummy_instance,
@@ -1558,7 +1582,7 @@ impl Game {
 
                     Event::MouseButtonDown(MouseButton::Left) => {
                         stream.send_message(&message::Information::LeftClick { x: game_mousex, y: game_mousey })?;
-                    }
+                    },
 
                     Event::MouseButtonUp(MouseButton::Right) => {
                         let mut options: Vec<(String, usize)> = Vec::new();

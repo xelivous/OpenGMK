@@ -1,6 +1,7 @@
 //! GameMaker 8 sound system.
 
 use rodio::{Device, Sink, Source};
+use serde::{Deserialize, Serialize};
 use std::{alloc, collections::HashMap, mem, slice, str, sync::Arc, time::Duration};
 
 pub struct AudioSystem {
@@ -12,7 +13,7 @@ pub struct AudioSystem {
     next_asset_handle: u64,
 }
 
-#[derive(Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct AudioHandle(u64);
 
 enum AudioAsset {
