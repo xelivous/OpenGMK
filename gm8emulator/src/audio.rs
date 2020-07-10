@@ -16,7 +16,12 @@ pub struct AudioSystem {
 #[derive(Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct AudioHandle(u64);
 
-enum AudioAsset {
+struct AudioAsset {
+    source: AudioAssetImpl,
+    volume: f32,
+}
+
+enum AudioAssetImpl {
     MP3(MP3Stream),
     Wave(WaveStream),
     Midi(/* good joke */),
@@ -357,6 +362,11 @@ impl<T: rodio::Sample + 'static> Source for PCMSource<T> {
     }
 }
 
+// put it here lol
+fn vol2vol(n: f32) -> f32 {
+    2.0f32.powf(n * 100f32.log2()) / 100.0
+}
+
 impl AudioSystem {
     pub fn new() -> Self {
         Self {
@@ -375,7 +385,7 @@ impl AudioSystem {
         };
 
         match self.assets.get(&sound) {
-            Some(AudioAsset::MP3(mp3)) => {
+            Some(AudioAsset { source: AudioAssetImpl::MP3(mp3), volume }) => {
                 let sink = match self.current_mp3.take() {
                     Some((_, sink)) => {
                         sink.stop();
@@ -386,20 +396,23 @@ impl AudioSystem {
                 let mut source = mp3.clone();
                 source.set_loop(looping);
                 sink.append(source);
+                sink.set_volume(vol2vol(*volume));
                 self.current_mp3 = Some((sound, sink));
             },
-            Some(AudioAsset::Wave(wave)) => {
+            Some(AudioAsset { source: AudioAssetImpl::Wave(wave), volume }) => {
                 let sink = Sink::new(device);
                 match wave {
                     WaveStream::Int16(ipcm) => {
                         let mut ipcm = ipcm.clone();
                         ipcm.set_loop(looping);
                         sink.append(ipcm);
+                        sink.set_volume(vol2vol(*volume)); // <-------
                     },
                     WaveStream::Float(fpcm) => {
                         let mut fpcm = fpcm.clone();
                         fpcm.set_loop(looping);
                         sink.append(fpcm);
+                        sink.set_volume(vol2vol(*volume));
                     },
                 }
                 self.wave_sinks.insert(sound, sink);
@@ -463,20 +476,36 @@ impl AudioSystem {
         });
     }
 
-    pub fn register_mp3(&mut self, data: impl Into<Box<[u8]>>) -> Option<AudioHandle> {
+    pub fn register_mp3(&mut self, data: impl Into<Box<[u8]>>, vol: f32) -> Option<AudioHandle> {
         let stream = MP3Stream::new(data.into().into())?;
         let id = self.next_asset_handle;
         self.next_asset_handle += 1;
-        self.assets.insert(AudioHandle(id), AudioAsset::MP3(stream));
+        self.assets.insert(AudioHandle(id), AudioAsset { source: AudioAssetImpl::MP3(stream), volume: vol });
         Some(AudioHandle(id))
     }
 
-    pub fn register_wav(&mut self, data: impl Into<Box<[u8]>>) -> Option<AudioHandle> {
+    pub fn register_wav(&mut self, data: impl Into<Box<[u8]>>, vol: f32) -> Option<AudioHandle> {
         let stream = WaveStream::new(data.into().into())?;
         let id = self.next_asset_handle;
         self.next_asset_handle += 1;
-        self.assets.insert(AudioHandle(id), AudioAsset::Wave(stream));
+        self.assets.insert(AudioHandle(id), AudioAsset { source: AudioAssetImpl::Wave(stream), volume: vol });
         Some(AudioHandle(id))
+    }
+
+    pub fn volume_adjust(&mut self, sound: AudioHandle, new: f32) {
+        if let Some((handle, mp3)) = &self.current_mp3 {
+            if *handle == sound {
+                mp3.set_volume(vol2vol(new));
+            }
+        }
+
+        for (_, sink) in self.wave_sinks.iter().filter(|(handle, _)| **handle == sound) {
+            sink.set_volume(vol2vol(new));
+        }
+
+        if let Some(asset) = self.assets.get_mut(&sound) {
+            asset.volume = new;
+        }
     }
 }
 

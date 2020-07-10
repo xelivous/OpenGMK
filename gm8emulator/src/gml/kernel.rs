@@ -9535,11 +9535,19 @@ impl Game {
         }
     }
 
-    pub fn sound_volume(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 2
-        //unimplemented!("Called unimplemented kernel function sound_volume")
-        // TODO
-        Ok(Default::default())
+    pub fn sound_volume(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        let (id, vol) = expect_args!(args, [int, real])?;
+        if let Some(sound) = self.assets.sounds.get_asset(id) {
+            if self.play_type != PlayType::Record {
+                if let Some(handle) = sound.audio {
+                    println!("SOMJE BITCH CALLED SOUD VOLUME FOR {} = {}", id, vol);
+                    self.audio_system.volume_adjust(handle, vol.into_inner() as f32);
+                }
+            }
+            Ok(Default::default())
+        } else {
+            Err(gml::Error::NonexistentAsset(asset::Type::Sound, id))
+        }
     }
 
     pub fn sound_fade(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {

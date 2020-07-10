@@ -330,11 +330,12 @@ impl Game {
             .into_iter()
             .map(|o| {
                 o.map(|b| {
+                    let vol = b.volume as f32;
                     Box::new(Sound {
                         name: b.name.into(),
                         audio: match b.extension.as_str() {
-                            ".wav" => b.data.and_then(|data| audio_system.register_wav(data)),
-                            ".mp3" => b.data.and_then(|data| audio_system.register_mp3(data)),
+                            ".wav" => b.data.and_then(|data| audio_system.register_wav(data, vol)),
+                            ".mp3" => b.data.and_then(|data| audio_system.register_mp3(data, vol)),
                             _ => None,
                         },
                     })
