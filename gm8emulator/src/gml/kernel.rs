@@ -9473,7 +9473,7 @@ impl Game {
         if let Some(sound) = self.assets.sounds.get_asset(id) {
             if self.play_type != PlayType::Record {
                 if let Some(handle) = sound.audio {
-                    self.audio_system.play(handle);
+                    self.audio_system.play(handle, false);
                 }
             }
             Ok(Default::default())
@@ -9482,32 +9482,57 @@ impl Game {
         }
     }
 
-    pub fn sound_loop(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 1
-        //unimplemented!("Called unimplemented kernel function sound_loop")
-        // TODO
-        Ok(Default::default())
+    pub fn sound_loop(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        let id = expect_args!(args, [int])?;
+        if let Some(sound) = self.assets.sounds.get_asset(id) {
+            if self.play_type != PlayType::Record {
+                if let Some(handle) = sound.audio {
+                    self.audio_system.play(handle, true);
+                }
+            }
+            Ok(Default::default())
+        } else {
+            Err(gml::Error::NonexistentAsset(asset::Type::Sound, id))
+        }
     }
 
-    pub fn sound_stop(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 1
-        //unimplemented!("Called unimplemented kernel function sound_stop")
-        // TODO
-        Ok(Default::default())
+    pub fn sound_stop(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        let id = expect_args!(args, [int])?;
+        if let Some(sound) = self.assets.sounds.get_asset(id) {
+            if self.play_type != PlayType::Record {
+                if let Some(handle) = sound.audio {
+                    self.audio_system.stop(handle);
+                }
+            }
+            Ok(Default::default())
+        } else {
+            Err(gml::Error::NonexistentAsset(asset::Type::Sound, id))
+        }
     }
 
     pub fn sound_stop_all(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 0
-        //unimplemented!("Called unimplemented kernel function sound_stop_all")
-        // TODO
+        if self.play_type != PlayType::Record {
+            self.audio_system.stop_all();
+        }
         Ok(Default::default())
     }
 
-    pub fn sound_isplaying(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
-        // Expected arg count: 1
-        //unimplemented!("Called unimplemented kernel function sound_isplaying")
-        // TODO
-        Ok(Default::default())
+    pub fn sound_isplaying(&mut self, _context: &mut Context, args: &[Value]) -> gml::Result<Value> {
+        let id = expect_args!(args, [int])?;
+        if let Some(sound) = self.assets.sounds.get_asset(id) {
+            if self.play_type != PlayType::Record {
+                if let Some(handle) = sound.audio {
+                    Ok(self.audio_system.is_playing(handle).into())
+                } else {
+                    Ok(gml::FALSE.into())
+                }
+            } else {
+                // this is bad?? it could cause actual logic bugs?
+                Ok(gml::FALSE.into())
+            }
+        } else {
+            Err(gml::Error::NonexistentAsset(asset::Type::Sound, id))
+        }
     }
 
     pub fn sound_volume(&mut self, _context: &mut Context, _args: &[Value]) -> gml::Result<Value> {
