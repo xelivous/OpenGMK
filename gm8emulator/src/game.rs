@@ -1130,6 +1130,9 @@ impl Game {
 
     /// Runs a frame loop and draws the screen. Exits immediately, without waiting for any FPS limitation.
     pub fn frame(&mut self) -> gml::Result<()> {
+        // "Garbage collect" dead audio sinks
+        self.audio_system.cleanup();
+
         // Update xprevious and yprevious for all instances
         let mut iter = self.instance_list.iter_by_insertion();
         while let Some(instance) = iter.next(&self.instance_list).map(|x| self.instance_list.get(x)) {
