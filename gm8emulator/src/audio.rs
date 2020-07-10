@@ -2,7 +2,7 @@
 
 use rodio::{Device, Sink, Source};
 use serde::{Deserialize, Serialize};
-use std::{alloc, collections::HashMap, mem, slice, iter, str, sync::Arc, time::Duration};
+use std::{alloc, collections::HashMap, iter, mem, slice, str, sync::Arc, time::Duration};
 
 pub struct AudioSystem {
     current_mp3: Option<(AudioHandle, Sink)>,
@@ -26,6 +26,7 @@ struct MP3Stream {
     channels: u16,
     duration: Duration,
     sample_rate: u32,
+    looping: bool,
 
     frame_buf: Box<[rmp3::Sample; rmp3::MAX_SAMPLES_PER_FRAME]>,
     frame_samples: &'static [rmp3::Sample],
@@ -53,6 +54,7 @@ impl Clone for MP3Stream {
             channels: self.channels,
             sample_rate: self.sample_rate,
             duration: self.duration,
+            looping: false,
 
             frame_buf: mp3_uninit_framebuf(),
             frame_samples: &[],
@@ -102,6 +104,7 @@ impl MP3Stream {
             channels,
             duration,
             sample_rate,
+            looping: false,
 
             frame_buf,
             frame_samples: &[],
@@ -113,6 +116,10 @@ impl MP3Stream {
 
             decoder: rmp3::Decoder::new(),
         })
+    }
+
+    fn set_loop(&mut self, v: bool) {
+        self.looping = v;
     }
 
     fn refill(&mut self) -> bool {
@@ -158,7 +165,14 @@ impl Iterator for MP3Stream {
                 if self.refill() {
                     self.next() // possible SO
                 } else {
-                    None
+                    if self.looping {
+                        self.data_ofs = 0;
+                        self.frame_ofs = 0;
+                        self.refill();
+                        self.next() // possible SO
+                    } else {
+                        None
+                    }
                 }
             },
         }
@@ -278,6 +292,7 @@ struct PCMSource<T: 'static> {
     channels: u16,
     duration: Duration,
     sample_rate: u32,
+    looping: bool,
 
     _data: Arc<Box<[u8]>>,
     pcm: &'static [T],
@@ -297,7 +312,11 @@ impl<T: rodio::Sample + 'static> PCMSource<T> {
         };
         let duration = Duration::from_secs_f64(pcm.len() as f64 / channels as f64 / sample_rate as f64);
 
-        Self { channels, duration, sample_rate, _data: data, pcm, ofs: 0 }
+        Self { channels, duration, sample_rate, looping: false, _data: data, pcm, ofs: 0 }
+    }
+
+    fn set_loop(&mut self, v: bool) {
+        self.looping = v;
     }
 }
 
@@ -307,7 +326,11 @@ impl<T: rodio::Sample + 'static> Iterator for PCMSource<T> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.pcm.get(self.ofs).copied()?;
-        self.ofs += 1;
+        if self.looping {
+            self.ofs = (self.ofs + 1) % self.pcm.len();
+        } else {
+            self.ofs += 1;
+        }
         Some(sample)
     }
 }
@@ -345,7 +368,7 @@ impl AudioSystem {
         }
     }
 
-    pub fn play(&mut self, sound: AudioHandle) {
+    pub fn play(&mut self, sound: AudioHandle, looping: bool) {
         let device = match &self.device {
             Some(device) => device,
             None => return,
@@ -360,20 +383,84 @@ impl AudioSystem {
                     },
                     None => Sink::new(device),
                 };
-                sink.append(mp3.clone());
+                let mut source = mp3.clone();
+                source.set_loop(looping);
+                sink.append(source);
                 self.current_mp3 = Some((sound, sink));
             },
             Some(AudioAsset::Wave(wave)) => {
                 let sink = Sink::new(device);
                 match wave {
-                    WaveStream::Int16(ipcm) => sink.append(ipcm.clone()),
-                    WaveStream::Float(fpcm) => sink.append(fpcm.clone()),
+                    WaveStream::Int16(ipcm) => {
+                        let mut ipcm = ipcm.clone();
+                        ipcm.set_loop(looping);
+                        sink.append(ipcm);
+                    },
+                    WaveStream::Float(fpcm) => {
+                        let mut fpcm = fpcm.clone();
+                        fpcm.set_loop(looping);
+                        sink.append(fpcm);
+                    },
                 }
                 self.wave_sinks.insert(sound, sink);
             },
             Some(_) => unimplemented!(),
             _ => (),
         }
+    }
+
+    pub fn cleanup(&mut self) {
+        if let Some((handle, sink)) = self.current_mp3.take() {
+            if sink.empty() {
+                // drop
+            } else {
+                self.current_mp3 = Some((handle, sink));
+            }
+        }
+
+        self.wave_sinks.retain(|_, s| !s.empty())
+    }
+
+    pub fn is_playing(&self, sound: AudioHandle) -> bool {
+        if let Some((handle, _)) = &self.current_mp3 {
+            if *handle == sound {
+                return true
+            }
+        }
+
+        self.wave_sinks.iter().any(|(h, s)| !s.empty() && *h == sound)
+    }
+
+    pub fn stop(&mut self, sound: AudioHandle) {
+        if let Some((handle, sink)) = self.current_mp3.take() {
+            if handle == sound {
+                sink.stop();
+            // dropped
+            } else {
+                self.current_mp3 = Some((handle, sink));
+            }
+        }
+
+        self.wave_sinks.retain(|handle, sink| {
+            if *handle == sound {
+                sink.stop();
+                false
+            } else {
+                true
+            }
+        })
+    }
+
+    pub fn stop_all(&mut self) {
+        if let Some((_, sink)) = self.current_mp3.take() {
+            sink.stop();
+            // dropped
+        }
+
+        self.wave_sinks.retain(|_, sink| {
+            sink.stop();
+            false
+        });
     }
 
     pub fn register_mp3(&mut self, data: impl Into<Box<[u8]>>) -> Option<AudioHandle> {
