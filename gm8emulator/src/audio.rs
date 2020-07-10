@@ -2,7 +2,7 @@
 
 use rodio::{Device, Sink, Source};
 use serde::{Deserialize, Serialize};
-use std::{alloc, collections::HashMap, mem, slice, str, sync::Arc, time::Duration};
+use std::{alloc, collections::HashMap, mem, slice, iter, str, sync::Arc, time::Duration};
 
 pub struct AudioSystem {
     current_mp3: Option<(AudioHandle, Sink)>,
@@ -224,14 +224,32 @@ impl WaveStream {
                     let (bps, fmt, channels, sample_rate) = (bits_per_sample?, format_tag?, channels?, sample_rate?);
                     match fmt {
                         1 => {
-                            assert_eq!(bps, 16); // It can technically be other than i16. TODO?
-                            break Some(WaveStream::Int16(PCMSource::new(
-                                data,
-                                offset + 8,
-                                chunk.len(),
-                                channels,
-                                sample_rate,
-                            )))
+                            if bps == 8 {
+                                let pcm = chunk
+                                    .iter()
+                                    .flat_map(|s| {
+                                        let bytes = ((*s as i16 - 0x80) << 8).to_le_bytes();
+                                        iter::once(bytes[0]).chain(Some(bytes[1]))
+                                    })
+                                    .collect::<Vec<u8>>();
+                                break Some(WaveStream::Int16(PCMSource::new(
+                                    pcm.into_boxed_slice().into(),
+                                    offset + 8,
+                                    chunk.len(),
+                                    channels,
+                                    sample_rate,
+                                )))
+                            } else if bps == 16 {
+                                break Some(WaveStream::Int16(PCMSource::new(
+                                    data,
+                                    offset + 8,
+                                    chunk.len(),
+                                    channels,
+                                    sample_rate,
+                                )))
+                            } else {
+                                unimplemented!("{}-bit PCM unsupported rn", bps);
+                            }
                         },
                         3 => {
                             assert_eq!(bps, 32); // Maybe this can be 64? Don't care.
