@@ -7,6 +7,7 @@ use crate::{
 };
 use byteorder::{ReadBytesExt, LE};
 use flate2::bufread::ZlibDecoder;
+use log::{debug, error, info, trace, warn};
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     fmt::{self, Display},
@@ -66,9 +67,8 @@ pub struct PESection {
     pub disk_address: u32,
 }
 
-pub fn from_exe<I, F>(mut exe: I, logger: Option<F>, strict: bool, multithread: bool) -> Result<GameAssets, ReaderError>
+pub fn from_exe<I>(mut exe: I, strict: bool, multithread: bool) -> Result<GameAssets, ReaderError>
 where
-    F: Copy + Fn(&str),
     I: AsRef<[u8]> + AsMut<[u8]>,
 {
     let exe = exe.as_mut();
@@ -120,16 +120,16 @@ where
             [0x55, 0x50, 0x58, 0x30, 0x00, 0x00, 0x00, 0x00] => {
                 // UPX0 section
                 upx0_virtual_len = Some(virtual_size);
-                log!(logger, "UPX0 section found, virtual len: {}", virtual_size);
+                debug!("UPX0 section found, virtual len: {}", virtual_size);
             },
             [0x55, 0x50, 0x58, 0x31, 0x00, 0x00, 0x00, 0x00] => {
                 // UPX1 section
                 upx1_data = Some((virtual_size, disk_address));
-                log!(logger, "UPX1 section found, virtual len: {}", virtual_size);
+                debug!("UPX1 section found, virtual len: {}", virtual_size);
             },
             [0x2E, 0x72, 0x73, 0x72, 0x63, 0x00, 0x00, 0x00] => {
                 // .rsrc section
-                log!(logger, "Found .rsrc section beginning at {}", disk_address);
+                debug!("Found .rsrc section beginning at {}", disk_address);
                 rsrc_location = Some(disk_address);
             },
             _ => {},
@@ -156,7 +156,7 @@ where
     };
 
     // Identify the game version in use and locate the gamedata header
-    let game_ver = gamedata::find(&mut exe, logger, upx_data)?;
+    let game_ver = gamedata::find(&mut exe, upx_data)?;
 
     // little helper thing
     macro_rules! assert_ver {
@@ -181,7 +181,7 @@ where
     exe.seek(SeekFrom::Current(settings_len as i64))?;
     let mut cfg = inflate(&exe.get_ref()[pos..pos + settings_len]);
 
-    log!(logger, "Reading settings chunk...");
+    debug!("Reading settings chunk...");
 
     let settings = {
         fn read_data_maybe(cfg: &mut impl Read) -> Result<Option<Box<[u8]>>, ReaderError> {
@@ -243,32 +243,32 @@ where
             Err(_) => false,
         };
 
-        log!(logger, " + Loaded settings structure");
-        log!(logger, "   - Start in full-screen mode: {}", fullscreen);
+        debug!(" + Loaded settings structure");
+        debug!("   - Start in full-screen mode: {}", fullscreen);
 
-        log!(logger, "   - Interpolate colors between pixels: {}", interpolate_pixels);
+        debug!("   - Interpolate colors between pixels: {}", interpolate_pixels);
 
-        log!(logger, "   - Don't draw a border in windowed mode: {}", dont_draw_border);
+        debug!("   - Don't draw a border in windowed mode: {}", dont_draw_border);
 
-        log!(logger, "   - Display the cursor: {}", display_cursor);
+        debug!("   - Display the cursor: {}", display_cursor);
 
-        log!(logger, "   - Scaling: {}", scaling);
+        debug!("   - Scaling: {}", scaling);
 
-        log!(logger, "   - Allow the player to resize the game window: {}", allow_resize);
+        debug!("   - Allow the player to resize the game window: {}", allow_resize);
 
-        log!(logger, "   - Let the game window always stay on top: {}", window_on_top);
+        debug!("   - Let the game window always stay on top: {}", window_on_top);
 
-        log!(logger, "   - Colour outside the room region (RGBA): #{:0>8X}", clear_colour);
+        debug!("   - Colour outside the room region (RGBA): #{:0>8X}", clear_colour);
 
-        log!(logger, "   - Set the resolution of the screen: {}", set_resolution);
+        debug!("   - Set the resolution of the screen: {}", set_resolution);
 
-        log!(logger, "   -   -> Color Depth: {}", match colour_depth {
+        debug!("   -   -> Color Depth: {}", match colour_depth {
             0 => "No Change",
             1 => "16-Bit",
             _ => "32-Bit",
         });
 
-        log!(logger, "   -   -> Resolution: {}", match resolution {
+        debug!("   -   -> Resolution: {}", match resolution {
             0 => "No Change",
             1 => "320x240",
             2 => "640x480",
@@ -278,7 +278,7 @@ where
             _ => "1600x1200",
         });
 
-        log!(logger, "   -   -> Frequency: {}", match frequency {
+        debug!("   -   -> Frequency: {}", match frequency {
             0 => "No Change",
             1 => "60Hz",
             2 => "70Hz",
@@ -287,59 +287,55 @@ where
             _ => "120Hz",
         });
 
-        log!(logger, "   - Don't show the buttons in the window captions: {}", dont_show_buttons);
+        debug!("   - Don't show the buttons in the window captions: {}", dont_show_buttons);
 
-        log!(logger, "   - Use synchronization to avoid tearing: {}", vsync);
+        debug!("   - Use synchronization to avoid tearing: {}", vsync);
 
-        log!(logger, "   - Disable screensavers and power saving actions: {}", disable_screensaver);
+        debug!("   - Disable screensavers and power saving actions: {}", disable_screensaver);
 
-        log!(logger, "   - Let <Esc> end the game: {}", esc_close_game);
+        debug!("   - Let <Esc> end the game: {}", esc_close_game);
 
-        log!(logger, "   - Treat the close button as the <Esc> key: {}", treat_close_as_esc);
+        debug!("   - Treat the close button as the <Esc> key: {}", treat_close_as_esc);
 
-        log!(logger, "   - Let <F1> show the game information: {}", f1_help_menu);
+        debug!("   - Let <F1> show the game information: {}", f1_help_menu);
 
-        log!(logger, "   - Let <F4> switch between screen modes: {}", f4_fullscreen_toggle);
+        debug!("   - Let <F4> switch between screen modes: {}", f4_fullscreen_toggle);
 
-        log!(logger, "   - Let <F5> save the game and <F6> load a game: {}", f5_save_f6_load);
+        debug!("   - Let <F5> save the game and <F6> load a game: {}", f5_save_f6_load);
 
-        log!(logger, "   - Let <F9> take a screenshot of the game: {}", f9_screenshot);
+        debug!("   - Let <F9> take a screenshot of the game: {}", f9_screenshot);
 
-        log!(logger, "   - Game Process Priority: {}", match priority {
+        debug!("   - Game Process Priority: {}", match priority {
             0 => "Normal",
             1 => "High",
             _ => "Highest",
         });
 
-        log!(logger, "   - Freeze the game window when the window loses focus: {}", freeze_on_lose_focus);
+        debug!("   - Freeze the game window when the window loses focus: {}", freeze_on_lose_focus);
 
-        log!(logger, "   - Loading bar: {}", match loading_bar {
+        debug!("   - Loading bar: {}", match loading_bar {
             0 => "No loading progress bar",
             1 => "Default loading progress bar",
             _ => "Own loading progress bar",
         });
 
-        log!(logger, "   - Show your own image while loading: {}", custom_load_image.is_some());
+        debug!("   - Show your own image while loading: {}", custom_load_image.is_some());
 
-        log!(logger, "   -   -> Make image partially translucent: {}", transparent);
+        debug!("   -   -> Make image partially translucent: {}", transparent);
 
-        log!(logger, "   -   -> Make translucent with alpha value: {}", translucency);
+        debug!("   -   -> Make translucent with alpha value: {}", translucency);
 
-        log!(logger, "   - Scale progress bar image: {}", scale_progress_bar);
+        debug!("   - Scale progress bar image: {}", scale_progress_bar);
 
-        log!(logger, "   - Display error messages: {}", show_error_messages);
+        debug!("   - Display error messages: {}", show_error_messages);
 
-        log!(logger, "   - Write error messages to file game_errors.log: {}", log_errors);
+        debug!("   - Write error messages to file game_errors.log: {}", log_errors);
 
-        log!(logger, "   - Abort on all error messages: {}", always_abort);
+        debug!("   - Abort on all error messages: {}", always_abort);
 
-        log!(logger, "   - Treat uninitialized variables as value 0: {}", zero_uninitialized_vars);
+        debug!("   - Treat uninitialized variables as value 0: {}", zero_uninitialized_vars);
 
-        log!(
-            logger,
-            "   - Throw an error when arguments aren't initialized correctly: {}",
-            error_on_uninitialized_args
-        );
+        debug!("   - Throw an error when arguments aren't initialized correctly: {}", error_on_uninitialized_args);
 
         Settings {
             fullscreen,
@@ -385,14 +381,11 @@ where
     // Embedded DirectX DLL
     // we obviously don't need this, so we skip over it
     // if we're verbose logging, read the dll name (usually D3DX8.dll, but...)
-    if logger.is_some() {
-        let dllname = exe.read_pas_string()?;
-        log!(logger, "Skipping embedded DLL '{}'", dllname);
-    } else {
-        // otherwise, skip dll name string
-        let dllname_len = exe.read_u32::<LE>()? as i64;
-        exe.seek(SeekFrom::Current(dllname_len))?;
-    }
+    let dllname = exe.read_pas_string()?;
+    debug!("Skipping embedded DLL '{}'", dllname);
+    // otherwise, skip dll name string
+    //let dllname_len = exe.read_u32::<LE>()? as i64;
+    //exe.seek(SeekFrom::Current(dllname_len))?;
 
     // skip or dump embedded dll data chunk
     let dll_len = exe.read_u32::<LE>()? as i64;
@@ -400,18 +393,18 @@ where
     exe.read_exact(&mut dx_dll)?;
 
     // yeah
-    gm80::decrypt(&mut exe, logger)?;
+    gm80::decrypt(&mut exe)?;
 
     // Garbage field - random bytes
     let garbage_dwords = exe.read_u32::<LE>()?;
     exe.seek(SeekFrom::Current((garbage_dwords * 4) as i64))?;
-    log!(logger, "Skipped {} garbage DWORDs", garbage_dwords);
+    debug!("Skipped {} garbage DWORDs", garbage_dwords);
 
     // GM8 Pro flag, game ID
     let pro_flag: bool = exe.read_u32::<LE>()? != 0;
     let game_id = exe.read_u32::<LE>()?;
-    log!(logger, "Pro flag: {}", pro_flag);
-    log!(logger, "Game ID: {}", game_id);
+    debug!("Pro flag: {}", pro_flag);
+    debug!("Game ID: {}", game_id);
 
     // 16 random bytes...
     let guid = [exe.read_u32::<LE>()?, exe.read_u32::<LE>()?, exe.read_u32::<LE>()?, exe.read_u32::<LE>()?];
@@ -479,7 +472,7 @@ where
     let mut extensions = Vec::with_capacity(extension_count);
     for _ in 0..extension_count {
         let ext = Extension::read(&mut exe, strict)?;
-        log!(logger, "+ Added extension '{}' (files: {})", ext.name, ext.files.len());
+        debug!("+ Added extension '{}' (files: {})", ext.name, ext.files.len());
         extensions.push(ext);
     }
 
@@ -491,17 +484,9 @@ where
     // Triggers
     assert_ver!("triggers header", 800, exe.read_u32::<LE>()?)?;
     let triggers: AssetList<Trigger> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        triggers.iter().flatten().for_each(|trigger| {
-            log!(
-                logger,
-                " + Added trigger '{}' (moment: {}, condition: {})",
-                trigger.name,
-                trigger.moment,
-                trigger.condition
-            );
-        });
-    }
+    triggers.iter().flatten().for_each(|trigger| {
+        debug!(" + Added trigger '{}' (moment: {}, condition: {})", trigger.name, trigger.moment, trigger.condition);
+    });
 
     // Constants
     assert_ver!("constants header", 800, exe.read_u32::<LE>()?)?;
@@ -510,59 +495,51 @@ where
     for _ in 0..constant_count {
         let name = exe.read_pas_string()?;
         let expression = exe.read_pas_string()?;
-        log!(logger, " + Added constant '{}' (expression: {})", name, expression);
+        debug!(" + Added constant '{}' (expression: {})", name, expression);
         constants.push(Constant { name, expression });
     }
 
     // Sounds
     assert_ver!("sounds header", 800, exe.read_u32::<LE>()?)?;
     let sounds: AssetList<Sound> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        sounds.iter().flatten().for_each(|sound| {
-            log!(logger, " + Added sound '{}' ({})", sound.name, sound.source);
-        });
-    }
+    sounds.iter().flatten().for_each(|sound| {
+        debug!(" + Added sound '{}' ({})", sound.name, sound.source);
+    });
 
     // Sprites
     assert_ver!("sprites header", 800, exe.read_u32::<LE>()?)?;
     let sprites: AssetList<Sprite> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        sprites.iter().flatten().for_each(|sprite| {
-            let framecount = sprite.frames.len();
-            let (width, height) = match sprite.frames.first() {
-                Some(frame) => (frame.width, frame.height),
-                None => (0, 0),
-            };
-            log!(
-                logger,
-                " + Added sprite '{}' ({}x{}, {} frame{})",
-                sprite.name,
-                width,
-                height,
-                framecount,
-                if framecount > 1 { "s" } else { "" }
-            );
-        });
-    }
+    sprites.iter().flatten().for_each(|sprite| {
+        let framecount = sprite.frames.len();
+        let (width, height) = match sprite.frames.first() {
+            Some(frame) => (frame.width, frame.height),
+            None => (0, 0),
+        };
+        debug!(
+            " + Added sprite '{}' ({}x{}, {} frame{})",
+            sprite.name,
+            width,
+            height,
+            framecount,
+            if framecount > 1 { "s" } else { "" }
+        );
+    });
 
     // Backgrounds
     assert_ver!("backgrounds header", 800, exe.read_u32::<LE>()?)?;
     let backgrounds: AssetList<Background> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        backgrounds.iter().flatten().for_each(|background| {
-            log!(logger, " + Added background '{}' ({}x{})", background.name, background.width, background.height);
-        });
-    }
+    backgrounds.iter().flatten().for_each(|background| {
+        debug!(" + Added background '{}' ({}x{})", background.name, background.width, background.height);
+    });
 
     // Paths
     assert_ver!("paths header", 800, exe.read_u32::<LE>()?)?;
     let paths: AssetList<Path> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
+    {
         use crate::asset::path::ConnectionKind;
 
         paths.iter().flatten().for_each(|path| {
-            log!(
-                logger,
+            debug!(
                 " + Added path '{}' ({}, {}, {} point{}, precision: {})",
                 path.name,
                 match path.connection {
@@ -580,71 +557,58 @@ where
     // Scripts
     assert_ver!("scripts header", 800, exe.read_u32::<LE>()?)?;
     let scripts: AssetList<Script> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        scripts.iter().flatten().for_each(|script| {
-            log!(logger, " + Added script '{}'", script.name);
-        });
-    }
+    scripts.iter().flatten().for_each(|script| {
+        debug!(" + Added script '{}'", script.name);
+    });
 
     // Fonts
     assert_ver!("fonts header", 800, exe.read_u32::<LE>()?)?;
     let fonts: AssetList<Font> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        fonts.iter().flatten().for_each(|font| {
-            log!(
-                logger,
-                " + Added font '{}' ({}, {}px{}{})",
-                font.name,
-                font.sys_name,
-                font.size,
-                if font.bold { ", bold" } else { "" },
-                if font.italic { ", italic" } else { "" }
-            );
-        });
-    }
+    fonts.iter().flatten().for_each(|font| {
+        debug!(
+            " + Added font '{}' ({}, {}px{}{})",
+            font.name,
+            font.sys_name,
+            font.size,
+            if font.bold { ", bold" } else { "" },
+            if font.italic { ", italic" } else { "" }
+        );
+    });
 
     // Timelines
     assert_ver!("timelines header", 800, exe.read_u32::<LE>()?)?;
     let timelines: AssetList<Timeline> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        timelines.iter().flatten().for_each(|timeline| {
-            log!(logger, " + Added timeline '{}' (moments: {})", timeline.name, timeline.moments.len());
-        });
-    }
+    timelines.iter().flatten().for_each(|timeline| {
+        debug!(" + Added timeline '{}' (moments: {})", timeline.name, timeline.moments.len());
+    });
 
     // Objects
     assert_ver!("objects header", 800, exe.read_u32::<LE>()?)?;
     let objects: AssetList<Object> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        objects.iter().flatten().for_each(|object| {
-            log!(
-                logger,
-                " + Added object {} ({}{}{}depth {})",
-                object.name,
-                if object.solid { "solid; " } else { "" },
-                if object.visible { "visible; " } else { "" },
-                if object.persistent { "persistent; " } else { "" },
-                object.depth,
-            );
-        });
-    }
+    objects.iter().flatten().for_each(|object| {
+        debug!(
+            " + Added object {} ({}{}{}depth {})",
+            object.name,
+            if object.solid { "solid; " } else { "" },
+            if object.visible { "visible; " } else { "" },
+            if object.persistent { "persistent; " } else { "" },
+            object.depth,
+        );
+    });
 
     // Rooms
     assert_ver!("rooms header", 800, exe.read_u32::<LE>()?)?;
     let rooms: AssetList<Room> = get_assets_ex(&mut exe, game_ver, strict, multithread)?;
-    if logger.is_some() {
-        rooms.iter().flatten().for_each(|room| {
-            log!(
-                logger,
-                " + Added room '{}' ({}x{}, {}FPS{})",
-                room.name,
-                room.width,
-                room.height,
-                room.speed,
-                if room.persistent { ", persistent" } else { "" },
-            );
-        });
-    }
+    rooms.iter().flatten().for_each(|room| {
+        debug!(
+            " + Added room '{}' ({}x{}, {}FPS{})",
+            room.name,
+            room.width,
+            room.height,
+            room.speed,
+            if room.persistent { ", persistent" } else { "" },
+        );
+    });
 
     let last_instance_id = exe.read_i32::<LE>()?;
     let last_tile_id = exe.read_i32::<LE>()?;
@@ -660,11 +624,10 @@ where
             IncludedFile::deserialize_exe(data, game_ver, strict).map_err(ReaderError::from)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if logger.is_some() {
+    {
         use crate::asset::included_file::ExportSetting;
         for file in &included_files {
-            log!(
-                logger,
+            debug!(
                 " + Added included file '{}' (len: {}, export mode: {})",
                 file.file_name,
                 file.source_length,
@@ -698,7 +661,7 @@ where
             freeze_game: data.read_u32::<LE>()? != 0,
             info: data.read_pas_string()?,
         };
-        log!(logger, " + Help Dialog: {:#?}", hdg);
+        debug!(" + Help Dialog: {:#?}", hdg);
         exe.seek(SeekFrom::Current(len as i64))?;
         hdg
     };
@@ -710,7 +673,7 @@ where
     for _ in 0..str_count {
         library_init_strings.push(exe.read_pas_string()?);
     }
-    log!(logger, " + Read {} action library initialization strings", str_count);
+    debug!(" + Read {} action library initialization strings", str_count);
 
     // Room Order
     assert_ver!("room order lookup", 700, exe.read_u32::<LE>()?)?;
@@ -720,7 +683,7 @@ where
         for _ in 0..ro_count {
             room_order.push(exe.read_i32::<LE>()?);
         }
-        log!(logger, " + Added Room Order LUT: {:?}", room_order);
+        debug!(" + Added Room Order LUT: {:?}", room_order);
 
         room_order
     };

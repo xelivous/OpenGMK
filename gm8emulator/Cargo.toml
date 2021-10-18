@@ -17,7 +17,7 @@ bincode = "1.2"
 byteorder = "1"
 cimgui-sys = { path = "ffi/cimgui-sys" }
 encoding_rs = "0.8.23"
-getopts = "0.2.21"
+argh = "0.1"
 getrandom = "0.2"
 glob = "0.3.0"
 gm8exe = { path = "../gm8exe" }
@@ -35,6 +35,8 @@ rust-ini = "0.17"
 serde = { version = "1.0", features = ["derive", "rc"] }
 time = { version = "0.3", features = ["local-offset", "macros"] }
 udon = { git = "https://github.com/adamcake/udon", branch = "july-demo", features = ["serde-derives", "wav"] }
+log = "0.4"
+env_logger = "0.9"
 
 [target.'cfg(all(target_os = "windows"))'.dependencies]
 crc32fast = "1.2"

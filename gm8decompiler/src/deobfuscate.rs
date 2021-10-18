@@ -16,6 +16,7 @@ use gml_parser::{
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
+    str::FromStr,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -23,6 +24,18 @@ pub enum Mode {
     On,
     Off,
     Auto,
+}
+impl FromStr for Mode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "on" => Ok(Mode::On),
+            "off" => Ok(Mode::Off),
+            "auto" => Ok(Mode::Auto),
+            _ => Err(format!("Invalid deobfuscator setting: {} (valid settings are on/off/auto)", s)),
+        }
+    }
 }
 
 struct DeobfState {

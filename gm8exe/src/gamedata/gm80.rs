@@ -1,4 +1,5 @@
 use byteorder::{ReadBytesExt, LE};
+use log::debug;
 use std::{
     cmp::max,
     io::{self, Read, Seek, SeekFrom},
@@ -6,15 +7,12 @@ use std::{
 
 /// Check if this is a standard gm8.0 game by looking for the loading sequence
 /// If so, sets the cursor to the start of the gamedata.
-pub fn check<F>(exe: &mut io::Cursor<&mut [u8]>, logger: Option<F>) -> io::Result<bool>
-where
-    F: Copy + Fn(&str),
-{
-    log!(logger, "Checking for standard GM8.0 format...");
+pub fn check(exe: &mut io::Cursor<&mut [u8]>) -> io::Result<bool> {
+    debug!("Checking for standard GM8.0 format...");
 
     // Verify size is large enough to do the following checks - otherwise it can't be this format
     if exe.get_ref().len() < 0x144AC0 + 4 {
-        log!(logger, "File too short for this format (0x{:X} bytes)", exe.get_ref().len());
+        debug!("File too short for this format (0x{:X} bytes)", exe.get_ref().len());
         return Ok(false)
     }
 
@@ -31,20 +29,20 @@ where
                 let mut buf = [0u8; 6];
                 exe.read_exact(&mut buf)?;
                 if buf == [0x0F, 0x85, 0x18, 0x01, 0x00, 0x00] {
-                    log!(logger, "GM8.0 magic check looks intact - value is {}", magic);
+                    debug!("GM8.0 magic check looks intact - value is {}", magic);
                     Some(magic)
                 } else {
-                    log!(logger, "GM8.0 magic check's JNZ is patched out");
+                    debug!("GM8.0 magic check's JNZ is patched out");
                     None
                 }
             },
             0x90 => {
                 exe.seek(SeekFrom::Current(4))?;
-                log!(logger, "GM8.0 magic check is patched out with NOP");
+                debug!("GM8.0 magic check is patched out with NOP");
                 None
             },
             i => {
-                log!(logger, "Unknown instruction in place of magic CMP: {}", i);
+                debug!("Unknown instruction in place of magic CMP: {}", i);
                 return Ok(false)
             },
         };
@@ -61,7 +59,7 @@ where
                         let mut buf = [0u8; 6];
                         exe.read_exact(&mut buf)?;
                         if buf == [0x0F, 0x85, 0xF5, 0x00, 0x00, 0x00] {
-                            log!(logger, "GM8.0 header version check looks intact - value is {}", magic);
+                            debug!("GM8.0 header version check looks intact - value is {}", magic);
                             Some(magic)
                         } else {
                             println!("GM8.0 header version check's JNZ is patched out");
@@ -70,16 +68,16 @@ where
                     },
                     0x90 => {
                         exe.seek(SeekFrom::Current(4))?;
-                        log!(logger, "GM8.0 header version check is patched out with NOP");
+                        debug!("GM8.0 header version check is patched out with NOP");
                         None
                     },
                     i => {
-                        log!(logger, "Unknown instruction in place of magic CMP: {}", i);
+                        debug!("Unknown instruction in place of magic CMP: {}", i);
                         return Ok(false)
                     },
                 }
             } else {
-                log!(logger, "GM8.0 header version check appears patched out");
+                debug!("GM8.0 header version check appears patched out");
                 None
             }
         };
@@ -87,7 +85,7 @@ where
         // Read header start pos
         exe.set_position(0x144AC0);
         let header_start = exe.read_u32::<LE>()?;
-        log!(logger, "Reading header from 0x{:X}", header_start);
+        debug!("Reading header from 0x{:X}", header_start);
         exe.set_position(header_start as u64);
 
         // Check the header magic numbers are what we read them as
@@ -97,20 +95,14 @@ where
                     let header1 = match exe.read_u32::<LE>() {
                         Ok(h) => h,
                         _ => {
-                            log!(logger, "Passed end of stream looking for GM8.0 header, so quitting");
+                            debug!("Passed end of stream looking for GM8.0 header, so quitting");
                             return Ok(false)
                         },
                     };
                     if header1 == n {
                         break
                     } else {
-                        log!(
-                            logger,
-                            "Didn't find GM8.0 header at {}: expected {}, got {}",
-                            exe.position() - 4,
-                            n,
-                            header1
-                        );
+                        debug!("Didn't find GM8.0 header at {}: expected {}, got {}", exe.position() - 4, n, header1);
                         // Skip ahead 10000 bytes in the file and try again - this is what the GM8 runner does
                         exe.seek(SeekFrom::Current(10000 - 4))?;
                     }
@@ -124,7 +116,7 @@ where
             Some(n) => {
                 let header2 = exe.read_u32::<LE>()?;
                 if header2 != n {
-                    log!(logger, "Failed to read GM8.0 header: expected version {}, got {}", n, header2);
+                    debug!("Failed to read GM8.0 header: expected version {}, got {}", n, header2);
                     return Ok(false)
                 }
             },
@@ -141,10 +133,7 @@ where
 }
 
 /// Removes GameMaker 8.0 protection in-place.
-pub fn decrypt<F>(data: &mut io::Cursor<&mut [u8]>, logger: Option<F>) -> io::Result<()>
-where
-    F: Copy + Fn(&str),
-{
+pub fn decrypt(data: &mut io::Cursor<&mut [u8]>) -> io::Result<()> {
     let mut swap_table = [0u8; 256];
     let mut reverse_table = [0u8; 256];
 
@@ -166,7 +155,7 @@ where
     // simplifying for expressions below
     let pos = data.position() as usize; // stream position
     let data = data.get_mut(); // mutable ref for writing
-    log!(logger, "Decrypting asset data... (size: {}, garbage1: {}, garbage2: {})", len, garbage1_size, garbage2_size);
+    debug!("Decrypting asset data... (size: {}, garbage1: {}, garbage2: {})", len, garbage1_size, garbage2_size);
 
     // decryption: first pass
     //   in reverse, data[i-1] = rev[data[i-1]] - (data[i-2] + (i - (pos+1)))

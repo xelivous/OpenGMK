@@ -1,4 +1,5 @@
 use byteorder::{ReadBytesExt, LE};
+use log::debug;
 use std::{
     convert::TryInto,
     io::{self, Read, Seek, SeekFrom},
@@ -12,15 +13,12 @@ pub enum XorMethod {
 
 /// Check if this is a standard gm8.1 game by looking for the loading sequence
 /// If so, removes gm81 encryption and sets the cursor to the start of the gamedata.
-pub fn check<F>(exe: &mut io::Cursor<&mut [u8]>, logger: Option<F>) -> io::Result<bool>
-where
-    F: Copy + Fn(&str),
-{
-    log!(logger, "Checking for standard GM8.1 format");
+pub fn check(exe: &mut io::Cursor<&mut [u8]>) -> io::Result<bool> {
+    debug!("Checking for standard GM8.1 format");
 
     // Verify size is large enough to do the following checks - otherwise it can't be this format
     if exe.get_ref().len() < 0x226D8A {
-        log!(logger, "File too short for this format (0x{:X} bytes)", exe.get_ref().len());
+        debug!("File too short for this format (0x{:X} bytes)", exe.get_ref().len());
         return Ok(false)
     }
 
@@ -41,15 +39,15 @@ where
             [0x81, 0x7D, 0xEC] => {
                 let magic = exe.read_u32::<LE>()?;
                 if exe.read_u8()? == 0x74 {
-                    log!(logger, "GM8.1 magic check looks intact - value is 0x{:X}", magic);
+                    debug!("GM8.1 magic check looks intact - value is 0x{:X}", magic);
                     Some(magic)
                 } else {
-                    log!(logger, "GM8.1 magic check's JE is patched out");
+                    debug!("GM8.1 magic check's JE is patched out");
                     None
                 }
             },
             b => {
-                log!(logger, "GM8.1 magic check's CMP is patched out ({:?})", b);
+                debug!("GM8.1 magic check's CMP is patched out ({:?})", b);
                 None
             },
         };
@@ -60,7 +58,7 @@ where
         exe.read_exact(&mut buf)?;
         let xor_method = match buf {
             [0x8B, 0x02, 0xC1, 0xE0, 0x10, 0x8B, 0x11, 0x81] => {
-                log!(logger, "Found SUDALV re-encryption");
+                debug!("Found SUDALV re-encryption");
                 XorMethod::Sudalv
             },
             _ => XorMethod::Normal,
@@ -70,10 +68,10 @@ where
         exe.set_position(header_start as u64);
         match gm81_magic {
             Some(n) => {
-                log!(logger, "Searching for GM8.1 magic number {} from position {}", n, header_start);
+                debug!("Searching for GM8.1 magic number {} from position {}", n, header_start);
                 let found_header = seek_value(exe, n)?.is_some();
                 if !found_header {
-                    log!(logger, "Didn't find GM81 magic value (0x{:X}) before EOF, so giving up", n);
+                    debug!("Didn't find GM81 magic value (0x{:X}) before EOF, so giving up", n);
                     return Ok(false)
                 }
             },
@@ -82,7 +80,7 @@ where
             },
         }
 
-        decrypt(exe, logger, xor_method)?;
+        decrypt(exe, xor_method)?;
         exe.seek(SeekFrom::Current(20))?;
         Ok(true)
     } else {
@@ -92,15 +90,12 @@ where
 
 /// Check if this is a standard gm8.1 game by looking for the default header (last-resort method)
 /// If so, removes gm81 encryption and sets the cursor to the start of the gamedata.
-pub fn check_lazy<F>(exe: &mut io::Cursor<&mut [u8]>, logger: Option<F>) -> io::Result<bool>
-where
-    F: Copy + Fn(&str),
-{
-    log!(logger, "Searching for default GM8.1 data header");
+pub fn check_lazy(exe: &mut io::Cursor<&mut [u8]>) -> io::Result<bool> {
+    debug!("Searching for default GM8.1 data header");
     exe.set_position(3800004);
     let found_header = seek_value(exe, 0xF7140067)?.is_some();
     if found_header {
-        decrypt(exe, logger, XorMethod::Normal)?;
+        decrypt(exe, XorMethod::Normal)?;
         exe.seek(SeekFrom::Current(20))?;
         Ok(true)
     } else {
@@ -130,10 +125,7 @@ pub fn seek_value(exe: &mut io::Cursor<&mut [u8]>, value: u32) -> io::Result<Opt
 }
 
 /// Removes GM8.1 encryption in-place.
-pub fn decrypt<F>(data: &mut io::Cursor<&mut [u8]>, logger: Option<F>, xor_method: XorMethod) -> io::Result<()>
-where
-    F: Copy + Fn(&str),
-{
+pub fn decrypt(data: &mut io::Cursor<&mut [u8]>, xor_method: XorMethod) -> io::Result<()> {
     // YYG's crc32 implementation
     let crc_32 = |hash_key: &Vec<u8>, crc_table: &[u32; 256]| -> u32 {
         let mut result: u32 = 0xFFFFFFFF;
@@ -172,7 +164,7 @@ where
     let seed1 = data.read_u32::<LE>()?;
     let seed2 = crc_32(&hash_key_utf16, &crc_table);
 
-    log!(logger, "Decrypting GM8.1 protection (hashkey: {}, seed1: {}, seed2: {})", hash_key, seed1, seed2);
+    debug!("Decrypting GM8.1 protection (hashkey: {}, seed1: {}, seed2: {})", hash_key, seed1, seed2);
 
     // work out where gm81 encryption starts
     let encryption_start = data.position() + u64::from(seed2 & 0xFF) + 10;

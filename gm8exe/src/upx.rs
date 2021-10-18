@@ -1,18 +1,11 @@
 use crate::reader::ReaderError;
 use byteorder::{ReadBytesExt, LE};
+use log::debug;
 use std::io;
 
 /// Unpack the bytecode of a UPX-protected exe into a separate buffer
-pub fn unpack<F>(
-    data: &mut io::Cursor<&mut [u8]>,
-    max_size: u32,
-    disk_offset: u32,
-    logger: Option<F>,
-) -> Result<Vec<u8>, ReaderError>
-where
-    F: Copy + Fn(&str),
-{
-    log!(logger, "Unpacking UPX with output size {}, data starting at {}", max_size, disk_offset);
+pub fn unpack(data: &mut io::Cursor<&mut [u8]>, max_size: u32, disk_offset: u32) -> Result<Vec<u8>, ReaderError> {
+    debug!("Unpacking UPX with output size {}, data starting at {}", max_size, disk_offset);
 
     // set up output vector
     let mut output: Vec<u8> = Vec::with_capacity(max_size as usize);
