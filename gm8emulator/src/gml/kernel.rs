@@ -7382,8 +7382,6 @@ impl Game {
             let gm_function = gml::String::from(fn_name.clone());
             let function = gm_function.decode(encoding);
 
-            let dummy = external::should_dummy(&*dll, &*function, self.play_type);
-
             let call_conv = match call_conv.round() {
                 0 => external::dll::CallConv::Cdecl,
                 _ => external::dll::CallConv::Stdcall,
@@ -7397,36 +7395,34 @@ impl Game {
                 return Err(gml::Error::WrongArgumentCount(5 + argnumb.max(5) as usize, args.len()))
             }
 
-            if let Some(dummy) = dummy {
-                // safety: arg count was checked above
-                let argc = argnumb as usize;
-                self.externals.define_dummy(&*dll, &*function, dummy, argc)
-            } else {
-                let arg_types = args[5..]
-                    .iter()
-                    .map(|v| match v.round() {
-                        0 => external::dll::ValueType::Real,
-                        _ => external::dll::ValueType::Str,
-                    })
-                    .collect::<Vec<_>>();
-                self.externals.define(&*dll, &*function, call_conv, &arg_types, res_type)
-            }
-            .map(Value::from)
-            .map_err(|e| gml::Error::FunctionError("external_define".into(), e))
+            let arg_types = args[5..]
+                .iter()
+                .map(|v| match v.round() {
+                    0 => external::dll::ValueType::Real,
+                    _ => external::dll::ValueType::Str,
+                })
+                .collect::<Vec<_>>();
+
+            self.externals
+                .define(external::dll::ExternalSignature {
+                    dll: dll.into_owned(),
+                    symbol: function.into_owned(),
+                    call_conv,
+                    type_args: arg_types,
+                    type_return: res_type,
+                })
+                .map(Value::from)
+                .map_err(|e| gml::Error::FunctionError("external_define".into(), e))
         } else {
             Err(gml::Error::WrongArgumentCount(5, args.len()))
         }
     }
 
-    pub fn external_call(&mut self, args: &[Value]) -> gml::Result<Value> {
+    pub fn external_call(&mut self, context: &mut Context, args: &[Value]) -> gml::Result<Value> {
         if let Some(id) = args.get(0) {
             let id = id.round();
-            let dll_args: Vec<external::dll::Value> =
-                (&args[1..]).iter().cloned().map(external::dll::Value::from).collect();
-            self.externals
-                .call(id, &dll_args)
-                .map(Value::from)
-                .map_err(|e| gml::Error::FunctionError("external_call".into(), e))
+            self.call_external(id, context, &args[1..])
+                .map_err(|e| gml::Error::FunctionError("external_call".into(), e.to_string()))
         } else {
             Ok(Default::default())
         }
@@ -7439,9 +7435,7 @@ impl Game {
             Version::GameMaker8_1 => encoding_rs::UTF_8,
         };
         let dll = gml::String::from(dll_name);
-        self.externals
-            .free(&*dll.decode(encoding))
-            .map_err(|e| gml::Error::FunctionError("external_free".into(), e))?;
+        self.externals.free(&*dll.decode(encoding));
         Ok(Default::default())
     }
 
@@ -9353,7 +9347,7 @@ impl Game {
             .paths
             .get_asset(src_id)
             .ok_or_else(|| {
-                gml::Error::FunctionError("path_assign".into(), "Destination path has an invalid index.".into())
+                gml::Error::FunctionError("path_assign".into(), "Source path does not exist".into())
             })?
             .clone();
         if dst_id >= 0 && (dst_id as usize) < self.assets.paths.len() {
@@ -9362,7 +9356,7 @@ impl Game {
             *dst = Some(src);
             Ok(Default::default())
         } else {
-            Err(gml::Error::FunctionError("path_assign".into(), "Source path does not exist".into()))
+            Err(gml::Error::FunctionError("path_assign".into(), "Destination path has an invalid index.".into()))
         }
     }
 
@@ -9994,7 +9988,7 @@ impl Game {
             .rooms
             .get_asset(src_id)
             .ok_or_else(|| {
-                gml::Error::FunctionError("room_assign".into(), "Destination room has an invalid index.".into())
+                gml::Error::FunctionError("room_assign".into(), "Source room does not exist".into())
             })?
             .clone();
         if dst_id >= 0 && (dst_id as usize) < self.assets.rooms.len() {
@@ -10003,7 +9997,7 @@ impl Game {
             *dst = Some(src);
             Ok(Default::default())
         } else {
-            Err(gml::Error::FunctionError("room_assign".into(), "Source room does not exist".into()))
+            Err(gml::Error::FunctionError("room_assign".into(), "Destination room has an invalid index.".into()))
         }
     }
 
